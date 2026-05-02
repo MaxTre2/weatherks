@@ -213,7 +213,7 @@ def forecasts():
         "hourly_forecast": hourly,
         "sun_phase": {"sr": sunrise.strftime('%H:%M'),
                       "ss": sunset.strftime('%H:%M')},
-        "alert_list": [],
+        "alert_list": []},
 from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timezone
