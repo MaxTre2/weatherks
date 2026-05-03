@@ -1,219 +1,36 @@
+#!/usr/bin/env python3
 """
 Weather Proxy Server for KSmobile/CM Launcher
-Использует OpenWeatherMap вместо мёртвых серверов ksmobile.com
+=============================================
+Притворяется weather.ksmobile.com но берёт данные из OpenWeatherMap.
+
+УСТАНОВКА:
+  pip install flask requests
+
+ЗАПУСК:
+  python weather_proxy_server.py
+
+КОНФИГУРАЦИЯ:
+  Замените OWM_API_KEY на ваш ключ OpenWeatherMap (бесплатно на openweathermap.org)
+
+ПАТЧ APK (после запуска этого сервера):
+  1. apktool d app.apk -o app_decompiled
+  2. Найдите в smali файлах строки "weather.ksmobile.com" и "weather.ksmobile.net"
+  3. Замените оба на IP/домен вашего сервера (например 192.168.1.100:5000)
+  4. apktool b app_decompiled -o app_patched.apk
+  5. Подпишите APK: zipalign + apksigner
+
+ТОЧНЫЕ ФАЙЛЫ SMALI для замены URL:
+  - com/cmnow/weather/request/e/a.smali  → URL прогноза погоды
+  - com/cmnow/weather/request/b/a.smali  → URL поиска города
+  - com/cmnow/weather/request/b/c.smali  → URL поиска TWC (оставить как есть)
+
+ФОРМАТ API (что ожидает лаунчер):
+  GET /api/city/search?f=<город>&locale=ru-ru&lang=ru
+  GET /api/forecasts?f=<city_code>&cc=<country>&lang=ru&u=m
+  GET /api/city/iplocate?locale=ru-ru&lat=<lat>&lng=<lng>
 """
 
-from flask import Flask, request, jsonify
-import requests
-from datetime import datetime, timezone
-import os
-
-app = Flask(__name__)
-
-OWM_API_KEY = os.environ.get("OWM_API_KEY", "8ab40a42ab7e2af856bb54cc3d9da233")
-OWM_BASE = "https://api.openweathermap.org"
-
-# Коды погоды OpenWeatherMap → Weather Channel (TWC)
-OWM_TO_WC = {
-    200:4,  201:4,  202:4,  210:4,  211:4,  212:4,  221:4,  230:4,  231:4,  232:4,
-    300:9,  301:9,  302:9,  310:9,  311:9,  312:9,  313:9,  314:9,  321:9,
-    500:11, 501:12, 502:12, 503:12, 504:12, 511:10, 520:40, 521:40, 522:40,
-    600:14, 601:16, 602:41, 611:6,  612:6,  613:6,  615:5,  616:5,
-    620:14, 621:16, 622:41,
-    701:20, 711:22, 721:21, 731:19, 741:20, 751:19, 761:19, 762:19, 771:23, 781:0,
-    800:32, 801:34, 802:30, 803:28, 804:26,
-}
-
-def owm_to_wc(owm_id, is_night=False):
-    wc = OWM_TO_WC.get(owm_id, 32)
-    if is_night and wc in (32, 34):
-        wc -= 1
-    return wc
-
-def wind_dir(deg):
-    dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE',
-            'S','SSW','SW','WSW','W','WNW','NW','NNW']
-    return dirs[round(deg / 22.5) % 16]
-
-def check_key():
-    if not OWM_API_KEY:
-        return jsonify({"errno": 99, "msg": "OWM_API_KEY not set"}), 500
-    return None
-
-
-# ── Поиск города ─────────────────────────────────────────────────
-@app.route('/api/city/search')
-def city_search():
-    err = check_key()
-    if err: return err
-
-    query = request.args.get('f', '')
-    lang  = request.args.get('lang', 'en')[:2]
-
-    r = requests.get(f"{OWM_BASE}/geo/1.0/direct",
-                     params={'q': query, 'limit': 10, 'appid': OWM_API_KEY},
-                     timeout=10)
-
-    if r.status_code != 200 or not r.json():
-        return jsonify({"errno": 1, "data": []})
-
-    results = []
-    for c in r.json():
-        name = c.get('local_names', {}).get(lang, c.get('name', ''))
-        results.append({
-            "g":  str(c['lat']),
-            "s":  str(c['lon']),
-            "c":  f"{c['lat']},{c['lon']}",
-            "n":  name or c['name'],
-            "co": c.get('country', ''),
-            "st": c.get('state', ''),
-            "tz": "UTC"
-        })
-
-    return jsonify({"errno": 0, "data": results})
-
-
-# ── IP-геолокация ─────────────────────────────────────────────────
-@app.route('/api/city/iplocate')
-def ip_locate():
-    err = check_key()
-    if err: return err
-
-    lat  = request.args.get('lat', '')
-    lng  = request.args.get('lng', '')
-    lang = request.args.get('locale', 'en')[:2]
-
-    if lat and lng:
-        r = requests.get(f"{OWM_BASE}/geo/1.0/reverse",
-                         params={'lat': lat, 'lon': lng,
-                                 'limit': 1, 'appid': OWM_API_KEY},
-                         timeout=10)
-        if r.status_code == 200 and r.json():
-            c = r.json()[0]
-            name = c.get('local_names', {}).get(lang, c.get('name', ''))
-            return jsonify({"errno": 0, "data": {
-                "g":  str(c['lat']),
-                "s":  str(c['lon']),
-                "c":  f"{c['lat']},{c['lon']}",
-                "n":  name or c['name'],
-                "co": c.get('country', ''),
-                "tz": "UTC"
-            }})
-
-    return jsonify({"errno": 1, "data": {}})
-
-
-# ── Прогноз погоды ────────────────────────────────────────────────
-@app.route('/api/forecasts')
-def forecasts():
-    err = check_key()
-    if err: return err
-
-    city_code = request.args.get('f', '')
-    lang      = request.args.get('lang', 'en')[:2]
-    units     = 'metric' if request.args.get('u', 'm') == 'm' else 'imperial'
-
-    try:
-        lat, lon = map(float, city_code.split(','))
-    except Exception:
-        return jsonify({"errno": 2, "data": {}})
-
-    params = {'lat': lat, 'lon': lon, 'appid': OWM_API_KEY,
-              'units': units, 'lang': lang}
-
-    r_curr = requests.get(f"{OWM_BASE}/data/2.5/weather",
-                          params=params, timeout=10)
-    r_fore = requests.get(f"{OWM_BASE}/data/2.5/forecast",
-                          params={**params, 'cnt': 40}, timeout=10)
-
-    if r_curr.status_code != 200 or r_fore.status_code != 200:
-        return jsonify({"errno": 3, "data": {}})
-
-    curr = r_curr.json()
-    fore = r_fore.json()
-
-    sys_  = curr.get('sys', {})
-    main  = curr['main']
-    wind  = curr.get('wind', {})
-    now   = datetime.now(timezone.utc).timestamp()
-    night = not (sys_.get('sunrise', 0) < now < sys_.get('sunset', 1e12))
-
-    # Текущая погода
-    td = {
-        "wc":   owm_to_wc(curr['weather'][0]['id'], night),
-        "tn":   round(main['temp']),
-        "th":   round(main['temp_max']),
-        "tl":   round(main['temp_min']),
-        "fl":   round(main.get('feels_like', main['temp'])),
-        "rh":   main['humidity'],
-        "wd":   wind_dir(wind.get('deg', 0)),
-        "kph":  round(wind.get('speed', 0) * 3.6),
-        "mph":  round(wind.get('speed', 0) * 2.237),
-        "p_mb": main.get('pressure', 1013),
-        "v_km": round(curr.get('visibility', 10000) / 1000),
-        "aqi":  -1,
-        "up":   "",
-        "date": datetime.fromtimestamp(curr['dt'], timezone.utc)
-                        .strftime('%Y%m%d %H:%M'),
-    }
-
-    # Дневной прогноз (агрегация по дням)
-    daily = {}
-    for item in fore.get('list', []):
-        day = datetime.fromtimestamp(item['dt'], timezone.utc).strftime('%Y%m%d')
-        if day not in daily:
-            daily[day] = {'t':[], 'mn':[], 'mx':[], 'wc':item['weather'][0]['id'],
-                          'ws':[], 'rh':[], 'date': day}
-        d = daily[day]
-        d['t'].append(item['main']['temp'])
-        d['mn'].append(item['main']['temp_min'])
-        d['mx'].append(item['main']['temp_max'])
-        d['ws'].append(item.get('wind', {}).get('speed', 0))
-        d['rh'].append(item['main']['humidity'])
-
-    forecast = []
-    for day in sorted(daily)[:10]:
-        d = daily[day]
-        avg = sum(d['t']) / len(d['t'])
-        forecast.append({
-            "date":  d['date'] + " 12:00",
-            "wc":    owm_to_wc(d['wc']),
-            "wctd":  owm_to_wc(d['wc']),
-            "tn":    round(avg),
-            "tl":    round(min(d['mn'])),
-            "th":    round(max(d['mx'])),
-            "fl":    round(avg - 2),
-            "rh":    round(sum(d['rh']) / len(d['rh'])),
-            "kph":   round(sum(d['ws']) / len(d['ws']) * 3.6),
-            "mph":   round(sum(d['ws']) / len(d['ws']) * 2.237),
-            "wd":    "N", "p_mb": 1013, "v_km": 10, "aqi": -1, "up": "",
-        })
-
-    # Почасовой прогноз
-    hourly = []
-    for item in fore.get('list', [])[:24]:
-        hourly.append({
-            "wc":   owm_to_wc(item['weather'][0]['id']),
-            "tm":   round(item['main']['temp']),
-            "tm_f": round(item['main']['temp'] * 9/5 + 32),
-            "uvi":  0,
-            "wd":   wind_dir(item.get('wind', {}).get('deg', 0)),
-            "ws":   round(item.get('wind', {}).get('speed', 0) * 3.6),
-            "pop":  round(item.get('pop', 0) * 100),
-        })
-
-    # Восход/закат
-    sunrise = datetime.fromtimestamp(sys_.get('sunrise', 0), timezone.utc)
-    sunset  = datetime.fromtimestamp(sys_.get('sunset', 0), timezone.utc)
-
-    return jsonify({"errno": 0, "data": {
-        "rc": 0,
-        "td": td,
-        "forecast": forecast,
-        "hourly_forecast": hourly,
-        "sun_phase": {"sr": sunrise.strftime('%H:%M'),
-                      "ss": sunset.strftime('%H:%M')},
-        "alert_list": []},
 from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timezone
@@ -463,8 +280,16 @@ def forecasts():
 
 
 
-# ── Короткий алиас /w/il?locale= → iplocate ─────────────────────
-@app.route('/w/il')
+# ── Короткие алиасы (для бинарного патча DEX — экономия символов) ─
+@app.route('/f')       # /f?  → /api/forecasts?
+def forecasts_alias():
+    return forecasts()
+
+@app.route('/cs')      # /cs? → /api/city/search?
+def city_search_alias():
+    return city_search()
+
+@app.route('/w/il')    # /w/il?locale= → /api/city/iplocate?locale=
 def iplocate_alias():
     return ip_locate()
 
@@ -518,127 +343,6 @@ def index():
             "/api/city/iplocate?lat=55.75&lng=37.61&locale=ru-ru"
         ]
     })
-
-from flask import Flask, request, jsonify
-import requests
-from datetime import datetime, timezone
-import math
-
-app = Flask(__name__)
-
-# ================= НАСТРОЙКИ =================
-OWM_API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"  # ← замените на свой ключ
-HOST = "0.0.0.0"
-PORT = 5000
-# =============================================
-
-def get_weather_from_owm(lat, lon):
-    """Запрос погоды с OpenWeatherMap"""
-    url = "https://api.openweathermap.org/data/3.0/onecall"
-    params = {
-        "lat": lat,
-        "lon": lon,
-        "appid": OWM_API_KEY,
-        "units": "metric",
-        "lang": "ru",
-        "exclude": "minutely,alerts"
-    }
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
-
-def convert_owm_to_ksmobile(owm_data, lang="ru"):
-    """Конвертация OWM → формат KSmobile"""
-    current = owm_data["current"]
-    daily_list = owm_data["daily"]
-    hourly_list = owm_data.get("hourly", [])
-
-    # Текущая погода
-    rc = {
-        "temp": int(round(current["temp"])),
-        "humidity": current["humidity"],
-        "wind_speed": int(round(current["wind_speed"])),
-        "wind_deg": current.get("wind_deg", 0),
-        "weather_code": current["weather"][0]["id"],
-        "weather_desc": current["weather"][0]["description"],
-        "pressure": int(current["pressure"] * 0.75006),  # гПа → мм рт.ст.
-        "visibility": current.get("visibility", 10000),
-        "uv_index": int(round(current.get("uvi", 0))),
-        "dew_point": int(round(current.get("dew_point", 0))),
-        "clouds": current.get("clouds", 0),
-        "feels_like": int(round(current["feels_like"])),
-    }
-
-    # Прогноз на дни
-    forecast = []
-    for day in daily_list[:7]:
-        forecast.append({
-            "date": datetime.fromtimestamp(day["dt"], tz=timezone.utc).strftime('%Y-%m-%d'),
-            "temp_max": int(round(day["temp"]["max"])),
-            "temp_min": int(round(day["temp"]["min"])),
-            "weather_code": day["weather"][0]["id"],
-            "weather_desc": day["weather"][0]["description"],
-            "humidity": day["humidity"],
-            "wind_speed": int(round(day["wind_speed"])),
-            "wind_deg": day.get("wind_deg", 0),
-            "pressure": int(day["pressure"] * 0.75006),
-            "uv_index": int(round(day.get("uvi", 0))),
-            "sunrise": datetime.fromtimestamp(day["sunrise"], tz=timezone.utc).strftime('%H:%M'),
-            "sunset": datetime.fromtimestamp(day["sunset"], tz=timezone.utc).strftime('%H:%M'),
-            "pop": int(day.get("pop", 0) * 100),
-        })
-
-    # Почасовой прогноз
-    hourly = []
-    for hour in hourly_list[:24]:
-        hourly.append({
-            "time": datetime.fromtimestamp(hour["dt"], tz=timezone.utc).strftime('%H:%M'),
-            "temp": int(round(hour["temp"])),
-            "weather_code": hour["weather"][0]["id"],
-            "weather_desc": hour["weather"][0]["description"],
-            "humidity": hour["humidity"],
-            "wind_speed": int(round(hour["wind_speed"])),
-            "wind_deg": hour.get("wind_deg", 0),
-            "pop": int(hour.get("pop", 0) * 100),
-        })
-
-    # Восход/закат
-    sunrise = datetime.fromtimestamp(current["sunrise"], tz=timezone.utc)
-    sunset = datetime.fromtimestamp(current["sunset"], tz=timezone.utc)
-
-    # Временной сдвиг
-    td = current.get("timezone_offset", 0)
-
-    return jsonify({"errno": 0, "data": {
-        "rc": rc,
-        "td": td,
-        "forecast": forecast,
-        "hourly_forecast": hourly,
-        "sun_phase": {"sr": sunrise.strftime('%H:%M'),
-                      "ss": sunset.strftime('%H:%M')},
-        "alert_list": []
-    }})
-
-
-@app.route('/weather', methods=['GET'])
-def weather():
-    """Основной эндпоинт погоды"""
-    try:
-        lat = float(request.args.get('lat', 55.7558))
-        lon = float(request.args.get('lon', 37.6173))
-
-        owm_data = get_weather_from_owm(lat, lon)
-        return convert_owm_to_ksmobile(owm_data)
-
-    except requests.exceptions.RequestException as e:
-        return jsonify({"errno": 1, "errmsg": f"OWM API error: {str(e)}"}), 502
-    except Exception as e:
-        return jsonify({"errno": 1, "errmsg": str(e)}), 500
-
-
-@app.route('/')
-def index():
-    return jsonify({"status": "ok", "service": "Weather Proxy for KSmobile"})
 
 
 if __name__ == '__main__':
