@@ -34,13 +34,12 @@ Weather Proxy Server for KSmobile/CM Launcher
 from flask import Flask, request, jsonify
 import requests
 from datetime import datetime, timezone
-import math
 
 app = Flask(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # НАСТРОЙКИ — ЗАМЕНИТЕ ЗДЕСЬ
-OWM_API_KEY = "8ab40a42ab7e2af856bb54cc3d9da233"  # ← бесплатный ключ с openweathermap.org
+OWM_API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"  # ← бесплатный ключ с openweathermap.org
 HOST = "0.0.0.0"
 PORT = 5000
 # ══════════════════════════════════════════════════════════════════
@@ -298,8 +297,8 @@ def iplocate_alias():
 # ── TWC /v3/location/point (reverse geocode by lat,lon) ──────────
 @app.route('/v3/location/point')
 def location_point():
-    err = check_key()
-    if err: return err
+    if not OWM_API_KEY or OWM_API_KEY == "YOUR_OPENWEATHERMAP_API_KEY":
+        return jsonify({"errno": 99, "msg": "OWM_API_KEY not set"}), 500
 
     geocode = request.args.get('geocode', '')
     lang = request.args.get('language', 'en-US')[:2]
