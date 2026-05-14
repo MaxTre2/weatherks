@@ -39,7 +39,7 @@ app = Flask(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # НАСТРОЙКИ — ЗАМЕНИТЕ ЗДЕСЬ
-OWM_API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"  # ← бесплатный ключ с openweathermap.org
+OWM_API_KEY = "8ab40a42ab7e2af856bb54cc3d9da233"  # ← бесплатный ключ с openweathermap.org
 HOST = "0.0.0.0"
 PORT = 5000
 # ══════════════════════════════════════════════════════════════════
@@ -292,6 +292,23 @@ def city_search_alias():
 def iplocate_alias():
     return ip_locate()
 
+
+# ── Числовые алиасы /w/1-5 (DEX-совместимые, алфавитный порядок) ─
+@app.route('/w/1')
+def w1(): return city_search()   # city/search .com
+
+@app.route('/w/2')
+def w2(): return forecasts()     # forecasts .com
+
+@app.route('/w/3')
+def w3(): return city_search()   # city/search .net
+
+@app.route('/w/4')
+def w4(): return forecasts()     # forecasts .net
+
+@app.route('/w/5')
+def w5(): return ip_locate()     # iplocate
+
 # ── Health check ────────────────────────────────────────────────────
 
 # ── TWC /v3/location/point (reverse geocode by lat,lon) ──────────
@@ -359,7 +376,7 @@ if __name__ == '__main__':
 ║    weather.ksmobile.net  →  <IP_вашего_сервера>:{PORT}   ║
 ╚══════════════════════════════════════════════════════════╝
 """)
-    if OWM_API_KEY == "YOUR_OPENWEATHERMAP_API_KEY":
+    if OWM_API_KEY == "8ab40a42ab7e2af856bb54cc3d9da233":
         print("⚠️  ВНИМАНИЕ: Задайте OWM_API_KEY в файле перед запуском!")
     
     app.run(host=HOST, port=PORT, debug=False)
