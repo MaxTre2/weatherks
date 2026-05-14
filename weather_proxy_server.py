@@ -39,7 +39,7 @@ app = Flask(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # НАСТРОЙКИ — ЗАМЕНИТЕ ЗДЕСЬ
-OWM_API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"  # ← бесплатный ключ с openweathermap.org
+OWM_API_KEY = "8ab40a42ab7e2af856bb54cc3d9da233"  # ← бесплатный ключ с openweathermap.org
 HOST = "0.0.0.0"
 PORT = 5000
 # ══════════════════════════════════════════════════════════════════
@@ -376,7 +376,7 @@ if __name__ == '__main__':
 ║    weather.ksmobile.net  →  <IP_вашего_сервера>:{PORT}   ║
 ╚══════════════════════════════════════════════════════════╝
 """)
-    if OWM_API_KEY == "YOUR_OPENWEATHERMAP_API_KEY":
+    if OWM_API_KEY == "8ab40a42ab7e2af856bb54cc3d9da233":
         print("⚠️  ВНИМАНИЕ: Задайте OWM_API_KEY в файле перед запуском!")
     
     app.run(host=HOST, port=PORT, debug=False)
