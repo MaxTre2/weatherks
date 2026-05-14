@@ -314,7 +314,7 @@ def w5(): return ip_locate()     # iplocate
 # ── TWC /v3/location/point (reverse geocode by lat,lon) ──────────
 @app.route('/v3/location/point')
 def location_point():
-    if not OWM_API_KEY or OWM_API_KEY == "YOUR_OPENWEATHERMAP_API_KEY":
+    if not OWM_API_KEY or OWM_API_KEY == "8ab40a42ab7e2af856bb54cc3d9da233":
         return jsonify({"errno": 99, "msg": "OWM_API_KEY not set"}), 500
 
     geocode = request.args.get('geocode', '')
