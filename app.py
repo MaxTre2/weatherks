@@ -8,7 +8,7 @@ Weather Proxy Server for KSmobile/CM Launcher
   pip install flask requests
 
 ЗАПУСК:
-  python weather_proxy_server.py
+  python app.py
 
 КОНФИГУРАЦИЯ:
   Замените OWM_API_KEY на ваш ключ OpenWeatherMap (бесплатно на openweathermap.org)
